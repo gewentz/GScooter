@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XBOT / MiniRobot BLE Controller & Inspector</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['"Chakra Petch"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace']
+          },
+          colors: {
+            hud: {
+              cyan: '#00f3ff',
+              cyanDark: '#008b94',
+              red: '#ff2a5f',
+              green: '#00ffa3',
+              amber: '#ffb703',
+              card: '#0f1722',
+              cardBorder: '#1e293b'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background: radial-gradient(circle at 50% 10%, #111a2e 0%, #070a12 85%);
+      color: #e2e8f0;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .hud-border {
+      position: relative;
+      border: 1px solid rgba(0, 243, 255, 0.22);
+      box-shadow: 0 0 20px rgba(0, 243, 255, 0.05);
+    }
+    .hud-border::before {
+      content: '';
+      position: absolute;
+      top: -2px; left: -2px;
+      width: 10px; height: 10px;
+      border-top: 2px solid #00f3ff;
+      border-left: 2px solid #00f3ff;
+    }
+    .hud-border::after {
+      content: '';
+      position: absolute;
+      bottom: -2px; right: -2px;
+      width: 10px; height: 10px;
+      border-bottom: 2px solid #00f3ff;
+      border-right: 2px solid #00f3ff;
+    }
+    .glow-cyan {
+      text-shadow: 0 0 10px rgba(0, 243, 255, 0.7);
+    }
+    .glow-green {
+      text-shadow: 0 0 10px rgba(0, 255, 163, 0.7);
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #008b94;
+    }
+  </style>
+</head>
+<body class="min-h-screen p-3 md:p-6 text-sm flex flex-col items-center">
+  <div class="w-full max-w-7xl flex flex-col gap-5">
+    
+    <!-- Top Bar -->
+    <header class="w-full flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/80 border border-slate-800 hud-border backdrop-blur-md">
+      <div class="flex items-center gap-3">
+        <div class="p-2 rounded-lg bg-cyan-950/60 border border-hud-cyan/40">
+          <svg class="w-7 h-7 text-hud-cyan animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl md:text-2xl font-bold font-display tracking-wider text-hud-cyan glow-cyan uppercase">
+            XBOT // BLE Telemetry & Inspector
+          </h1>
+          <p class="text-xs text-slate-400">MiniRobot / White Label Reverse Engineering Suite</p>
+        </div>
+      </div>
+
+      <!-- State Indicator & Connect Button -->
+      <div class="flex flex-wrap items-center gap-3">
+        <div id="statusBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs text-slate-300">
+          <span id="statusLed" class="w-2.5 h-2.5 rounded-full bg-hud-red inline-block shadow-[0_0_8px_#ff2a5f]"></span>
+          <span id="statusText">DESCONECTADO</span>
+        </div>
+
+        <button id="btnConnect" class="px-5 py-2.5 rounded-lg font-display font-semibold tracking-wide text-xs md:text-sm uppercase bg-hud-cyan/10 border border-hud-cyan hover:bg-hud-cyan hover:text-black transition-all duration-200 active:scale-95 flex items-center gap-2 text-hud-cyan">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          Escanear e Conectar
+        </button>
+      </div>
+    </header>
+
+    <!-- Compatibility Banner (Hidden by default unless unsupported) -->
+    <div id="browserAlert" class="hidden p-4 rounded-xl bg-amber-950/40 border border-hud-amber text-hud-amber text-xs leading-relaxed">
+      ⚠️ <strong>Aviso de Compatibilidade:</strong> A Web Bluetooth API requer <strong>Google Chrome</strong>, <strong>Microsoft Edge</strong> ou <strong>Opera</strong> e deve ser executada em um ambiente seguro (<strong>HTTPS</strong> ou <strong>localhost</strong>). No iOS, você pode usar navegadores habilitados como o <em>Bluefy</em>.
+    </div>
+
+    <!-- Interactive Diagnostic Card for Unsupported Environments -->
+    <div id="diagnosticPanel" class="hidden p-5 rounded-xl bg-slate-900/90 border border-hud-red/50 hud-border flex flex-col gap-3">
+      <div class="flex items-center gap-2 text-hud-red font-display font-bold text-sm tracking-wide uppercase">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <span>Diagnóstico: Por que o Web Bluetooth está inacessível?</span>
+      </div>
+      
+      <div id="diagnosticDetails" class="text-xs text-slate-300 space-y-2 leading-relaxed">
+        <!-- Injected via JavaScript with precise reasons -->
+      </div>
+
+      <div class="mt-2 p-3 rounded-lg bg-black/60 border border-slate-800 text-xs">
+        <span class="text-slate-400 block font-semibold mb-1">Como rodar localmente no seu computador / celular:</span>
+        <ol class="list-decimal list-inside text-slate-300 space-y-1">
+          <li>Baixe ou salve este arquivo como <code class="text-hud-cyan font-mono bg-slate-800 px-1 rounded">index.html</code> em uma pasta.</li>
+          <li>Abra o terminal nessa pasta e inicie um servidor HTTP local:
+            <div class="flex items-center gap-2 mt-1">
+              <code class="bg-slate-950 px-2 py-1 rounded text-hud-green font-mono flex-1 border border-slate-800">python3 -m http.server 8000</code>
+              <button id="btnCopyPy" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px]">Copiar</button>
+            </div>
+          </li>
+          <li>Abra o <strong>Google Chrome</strong> e acesse: <a href="http://localhost:8000" target="_blank" class="text-hud-cyan underline">http://localhost:8000</a> (o endereço <code class="text-slate-200 font-mono">localhost</code> é considerado ambiente seguro nativo).</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Quick Status Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Dispositivo</div>
+        <div id="dispDeviceName" class="text-sm font-semibold text-slate-200 truncate mt-0.5">Nenhum</div>
+      </div>
+      <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Serviços Detectados</div>
+        <div id="dispServiceCount" class="text-sm font-semibold text-hud-cyan mt-0.5">0</div>
+      </div>
+      <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Pacotes RX</div>
+        <div id="dispRxCount" class="text-sm font-semibold text-hud-green mt-0.5">0</div>
+      </div>
+      <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Último Timestamp</div>
+        <div id="dispLastTime" class="text-sm font-semibold text-slate-300 mt-0.5">--:--:--</div>
+      </div>
+    </div>
+
+    <!-- Main Workspace (Grid 2 cols) -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      
+      <!-- Left Panel: GATT Services and Characteristics (5 cols) -->
+      <section class="lg:col-span-5 flex flex-col gap-4">
+        <div class="p-4 rounded-xl bg-slate-900/70 border border-slate-800 hud-border flex flex-col h-[520px]">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+            <h2 class="font-display font-semibold text-sm uppercase tracking-wider text-slate-200 flex items-center gap-2">
+              <svg class="w-4 h-4 text-hud-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+              Serviços & Características GATT
+            </h2>
+            <span class="text-[10px] text-slate-500 uppercase">Árvore BLE</span>
+          </div>
+
+          <!-- Tree View Container -->
+          <div id="servicesTree" class="flex-1 overflow-y-auto mt-3 pr-1 space-y-3 text-xs">
+            <div class="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+              <svg class="w-8 h-8 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+              </svg>
+              <span>Nenhum dispositivo conectado</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mini Commands Shortcuts -->
+        <div class="p-4 rounded-xl bg-slate-900/70 border border-slate-800">
+          <h3 class="text-xs font-semibold uppercase text-slate-300 mb-2 font-display">Comandos Comuns LebiTEC/XBOT</h3>
+          <p class="text-[11px] text-slate-400 mb-3">Predefinições de frames frequentemente usados nas controladoras para testes:</p>
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <button class="preset-btn px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 active:border-hud-cyan truncate" data-hex="55 aa 03 22 01 00 25">
+              💡 Farol ON
+            </button>
+            <button class="preset-btn px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 active:border-hud-cyan truncate" data-hex="55 aa 03 22 00 00 24">
+              🌑 Farol OFF
+            </button>
+            <button class="preset-btn px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 active:border-hud-cyan truncate" data-hex="55 aa 03 20 65 00 87">
+              🔒 Travar Motor
+            </button>
+            <button class="preset-btn px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 active:border-hud-cyan truncate" data-hex="55 aa 03 20 64 00 86">
+              🔓 Destravar Motor
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Command Dispatcher & Live Log (7 cols) -->
+      <section class="lg:col-span-7 flex flex-col gap-4">
+        
+        <!-- Command Dispatcher Box -->
+        <div class="p-4 rounded-xl bg-slate-900/70 border border-slate-800 hud-border">
+          <h2 class="font-display font-semibold text-sm uppercase tracking-wider text-slate-200 mb-3 flex items-center justify-between">
+            <span>Transmissor Hexadecimal (TX)</span>
+            <span class="text-[10px] text-slate-500">Manual Packet Sender</span>
+          </h2>
+
+          <div class="flex flex-col gap-3">
+            <div>
+              <label class="text-[11px] text-slate-400 mb-1 block">Característica Alvo (com propriedade WRITE):</label>
+              <select id="charSelect" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-hud-cyan focus:outline-none focus:border-hud-cyan">
+                <option value="">Selecione após conectar...</option>
+              </select>
+            </div>
+
+            <div class="flex gap-2">
+              <input type="text" id="hexInput" placeholder="Ex: 55 aa 03 22 01 00 25" class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-hud-cyan uppercase tracking-wider font-mono">
+              <button id="btnSendHex" class="px-4 py-2 rounded-lg bg-hud-cyan/20 border border-hud-cyan text-hud-cyan hover:bg-hud-cyan hover:text-black font-semibold text-xs tracking-wider uppercase transition-all duration-150">
+                Enviar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Real-time Console Log -->
+        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 hud-border flex flex-col flex-1 h-[420px]">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 rounded-full bg-hud-green animate-ping"></div>
+              <h2 class="font-display font-semibold text-sm uppercase tracking-wider text-slate-200">Terminal de Pacotes BLE</h2>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-[11px] text-slate-400 flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" id="autoScrollCheck" checked class="rounded bg-slate-800 border-slate-700 text-hud-cyan focus:ring-0">
+                Auto-scroll
+              </label>
+              <button id="btnClearLog" class="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">
+                Limpar
+              </button>
+            </div>
+          </div>
+
+          <!-- Log stream viewport -->
+          <div id="logViewport" class="flex-1 overflow-y-auto mt-3 space-y-1.5 font-mono text-[11px] leading-relaxed pr-1">
+            <div class="text-slate-500 italic">[SISTEMA] Aguardando início do scan BLE...</div>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    // State management
+    const state = {
+      device: null,
+      server: null,
+      services: [],
+      writeCharacteristics: [],
+      subscribedCharacteristics: new Map(),
+      rxCounter: 0
+    };
+
+    // DOM Elements
+    const btnConnect = document.getElementById('btnConnect');
+    const statusLed = document.getElementById('statusLed');
+    const statusText = document.getElementById('statusText');
+    const browserAlert = document.getElementById('browserAlert');
+    const servicesTree = document.getElementById('servicesTree');
+    const charSelect = document.getElementById('charSelect');
+    const hexInput = document.getElementById('hexInput');
+    const btnSendHex = document.getElementById('btnSendHex');
+    const logViewport = document.getElementById('logViewport');
+    const btnClearLog = document.getElementById('btnClearLog');
+    const autoScrollCheck = document.getElementById('autoScrollCheck');
+    const dispDeviceName = document.getElementById('dispDeviceName');
+    const dispServiceCount = document.getElementById('dispServiceCount');
+    const dispRxCount = document.getElementById('dispRxCount');
+    const dispLastTime = document.getElementById('dispLastTime');
+    const diagnosticPanel = document.getElementById('diagnosticPanel');
+    const diagnosticDetails = document.getElementById('diagnosticDetails');
+    const btnCopyPy = document.getElementById('btnCopyPy');
+
+    function runEnvironmentDiagnostics() {
+      const isBluetoothAvailable = Boolean(navigator.bluetooth);
+      const isSecure = window.isSecureContext;
+      const isInIframe = window.self !== window.top;
+      const userAgent = navigator.userAgent.toLowerCase();
+      const isChromium = userAgent.includes('chrome') || userAgent.includes('edg') || userAgent.includes('opr');
+      const isSafari = userAgent.includes('safari') && !isChromium;
+      const isFirefox = userAgent.includes('firefox');
+      const isIOS = /iphone|ipad|ipod/.test(userAgent);
+
+      if (isBluetoothAvailable) {
+        appendLog('SISTEMA', 'Web Bluetooth API detectada e habilitada neste ambiente.', 'rx');
+        return;
+      }
+
+      diagnosticPanel.classList.remove('hidden');
+      browserAlert.classList.remove('hidden');
+
+      const issues = [];
+
+      if (isInIframe) {
+        issues.push(`
+          <div class="p-2 rounded bg-red-950/30 border border-hud-red/40">
+            <strong>1. Janela de Pré-visualização (Iframe restrito):</strong>
+            O botão <em>Preview</em> executa o app dentro de uma janela embutida sem permissão explícita de hardware (<code>allow="bluetooth"</code>). Para conectar ao patinete, o arquivo precisa ser aberto diretamente em uma aba do Chrome.
+          </div>
+        `);
+      }
+
+      if (!isSecure) {
+        issues.push(`
+          <div class="p-2 rounded bg-red-950/30 border border-hud-red/40">
+            <strong>2. Origem Não Segura (Insecure Context):</strong>
+            Você está abrindo o arquivo via <code>file:///</code> ou HTTP não criptografado. O Web Bluetooth exige <code>localhost</code> ou <code>https://</code> para ser ativado pelo Chrome.
+          </div>
+        `);
+      }
+
+      if (isFirefox) {
+        issues.push(`
+          <div class="p-2 rounded bg-red-950/30 border border-hud-red/40">
+            <strong>3. Firefox detectado:</strong> A Mozilla optou por não implementar a Web Bluetooth API por padrão por questões de especificação de privacidade. Use Chrome ou Edge.
+          </div>
+        `);
+      } else if (isSafari || isIOS) {
+        issues.push(`
+          <div class="p-2 rounded bg-red-950/30 border border-hud-red/40">
+            <strong>3. Safari / iOS detectado:</strong> A Apple bloqueia a Web Bluetooth API em todos os navegadores padrão no iOS. No iPhone, é necessário usar um navegador com wrapper BLE dedicado (ex: app <em>Bluefy</em> na App Store).
+          </div>
+        `);
+      }
+
+      diagnosticDetails.innerHTML = issues.join('');
+    }
+
+    if (btnCopyPy) {
+      btnCopyPy.addEventListener('click', () => {
+        const text = 'python3 -m http.server 8000';
+        const tempInput = document.createElement('input');
+        tempInput.value = text;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        btnCopyPy.textContent = 'Copiado!';
+        setTimeout(() => { btnCopyPy.textContent = 'Copiar'; }, 2000);
+      });
+    }
+
+    // Logging helper
+    function appendLog(category, message, direction = 'neutral') {
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+      dispLastTime.textContent = timeStr;
+
+      const row = document.createElement('div');
+      row.className = 'flex items-start gap-2 py-0.5 border-b border-slate-900/60 font-mono';
+
+      let dirBadge = '<span class="text-slate-500 font-bold">INFO</span>';
+      let msgColor = 'text-slate-300';
+
+      if (direction === 'tx') {
+        dirBadge = '<span class="text-hud-cyan font-bold">TX ▶</span>';
+        msgColor = 'text-hud-cyan';
+      } else if (direction === 'rx') {
+        dirBadge = '<span class="text-hud-green font-bold">◀ RX</span>';
+        msgColor = 'text-hud-green';
+      } else if (direction === 'err') {
+        dirBadge = '<span class="text-hud-red font-bold">ERR ✖</span>';
+        msgColor = 'text-hud-red';
+      }
+
+      row.innerHTML = `
+        <span class="text-slate-500 select-none text-[10px] shrink-0">${timeStr}</span>
+        <span class="shrink-0 text-[10px]">${dirBadge}</span>
+        <span class="shrink-0 text-slate-400 font-semibold">[${category}]</span>
+        <span class="${msgColor} break-all flex-1">${escapeHtml(message)}</span>
+      `;
+
+      logViewport.appendChild(row);
+
+      if (autoScrollCheck.checked) {
+        logViewport.scrollTop = logViewport.scrollHeight;
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // Hex utilities
+    function bufferToHex(buffer) {
+      return Array.from(new Uint8Array(buffer))
+        .map(b => b.toString(16).padStart(2, '0').toUpperCase())
+        .join(' ');
+    }
+
+    function hexStringToUint8Array(hexString) {
+      const clean = hexString.replace(/\s+|0x/g, '');
+      if (clean.length % 2 !== 0) {
+        throw new Error('A quantidade de caracteres hexadecimais deve ser par.');
+      }
+      const array = new Uint8Array(clean.length / 2);
+      for (let i = 0; i < clean.length; i += 2) {
+        const byte = parseInt(clean.substring(i, i + 2), 16);
+        if (isNaN(byte)) throw new Error(`Byte inválido detectado: ${clean.substring(i, i + 2)}`);
+        array[i / 2] = byte;
+      }
+      return array;
+    }
+
+    function setConnectionStatus(status) {
+      if (status === 'connected') {
+        statusLed.className = 'w-2.5 h-2.5 rounded-full bg-hud-green shadow-[0_0_8px_#00ffa3] inline-block';
+        statusText.textContent = 'CONECTADO';
+        btnConnect.textContent = 'Desconectar';
+        btnConnect.classList.replace('text-hud-cyan', 'text-hud-red');
+        btnConnect.classList.replace('border-hud-cyan', 'border-hud-red');
+        btnConnect.classList.replace('bg-hud-cyan/10', 'bg-hud-red/10');
+      } else if (status === 'connecting') {
+        statusLed.className = 'w-2.5 h-2.5 rounded-full bg-hud-amber shadow-[0_0_8px_#ffb703] inline-block animate-ping';
+        statusText.textContent = 'CONECTANDO...';
+        btnConnect.disabled = true;
+      } else {
+        statusLed.className = 'w-2.5 h-2.5 rounded-full bg-hud-red shadow-[0_0_8px_#ff2a5f] inline-block';
+        statusText.textContent = 'DESCONECTADO';
+        btnConnect.textContent = 'Escanear e Conectar';
+        btnConnect.disabled = false;
+        btnConnect.classList.replace('text-hud-red', 'text-hud-cyan');
+        btnConnect.classList.replace('border-hud-red', 'border-hud-cyan');
+        btnConnect.classList.replace('bg-hud-red/10', 'bg-hud-cyan/10');
+      }
+    }
+
+    async function connectBluetooth() {
+      if (!navigator.bluetooth) {
+        browserAlert.classList.remove('hidden');
+        appendLog('BLE', 'Web Bluetooth não está disponível neste navegador/ambiente.', 'err');
+        return;
+      }
+
+      try {
+        setConnectionStatus('connecting');
+        appendLog('BLE', 'Iniciando seletor de dispositivos Bluetooth...');
+
+        // Scooter controllers (Nordic UART, LebiTEC, etc.) usually use custom 128-bit UUIDs.
+        // We request acceptAllDevices: true with optionalServices to discover everything.
+        const device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [
+            'generic_access',
+            'generic_attribute',
+            // Common Nordic / Scooter UART UUIDs
+            '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+            '0000ffe0-0000-1000-8000-00805f9b34fb',
+            '0000fee7-0000-1000-8000-00805f9b34fb',
+            '0000fe95-0000-1000-8000-00805f9b34fb',
+            'e95d0753-251d-470a-a062-fa1922dfa9a8'
+          ]
+        });
+
+        state.device = device;
+        dispDeviceName.textContent = device.name || 'Sem nome (ID: ' + device.id.slice(0, 5) + ')';
+        appendLog('BLE', `Dispositivo selecionado: ${device.name || 'Desconhecido'} (${device.id})`);
+
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+
+        appendLog('GATT', 'Conectando ao GATT Server...');
+        const server = await device.gatt.connect();
+        state.server = server;
+        setConnectionStatus('connected');
+        appendLog('GATT', 'Conexão GATT estabelecida com sucesso!');
+
+        // Discover services
+        await discoverServices(server);
+
+      } catch (err) {
+        setConnectionStatus('disconnected');
+        appendLog('BLE_ERR', err.message || err, 'err');
+      }
+    }
+
+    function onDisconnected() {
+      setConnectionStatus('disconnected');
+      appendLog('BLE', 'Dispositivo desconectado.', 'err');
+      state.services = [];
+      state.writeCharacteristics = [];
+      state.subscribedCharacteristics.clear();
+      charSelect.innerHTML = '<option value="">Desconectado</option>';
+      servicesTree.innerHTML = `
+        <div class="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+          <span>Dispositivo desconectado</span>
+        </div>`;
+      dispDeviceName.textContent = 'Nenhum';
+    }
+
+    async function disconnectBluetooth() {
+      if (state.device && state.device.gatt.connected) {
+        appendLog('BLE', 'Encerrando conexão propositalmente...');
+        state.device.gatt.disconnect();
+      }
+    }
+
+    async function discoverServices(server) {
+      appendLog('GATT', 'Descobrindo serviços primários...');
+      servicesTree.innerHTML = '<div class="text-hud-cyan animate-pulse">Inspecionando serviços e características...</div>';
+
+      try {
+        const services = await server.getPrimaryServices();
+        state.services = services;
+        dispServiceCount.textContent = services.length;
+        appendLog('GATT', `Encontrados ${services.length} serviços primários.`);
+
+        servicesTree.innerHTML = '';
+        charSelect.innerHTML = '';
+        state.writeCharacteristics = [];
+
+        for (const service of services) {
+          const serviceBlock = document.createElement('div');
+          serviceBlock.className = 'p-2.5 rounded bg-slate-950/70 border border-slate-800 text-slate-300';
+          
+          const sTitle = document.createElement('div');
+          sTitle.className = 'font-bold text-hud-cyan text-[11px] break-all';
+          sTitle.textContent = `SERVIÇO: ${service.uuid}`;
+          serviceBlock.appendChild(sTitle);
+
+          const charListContainer = document.createElement('div');
+          charListContainer.className = 'mt-2 pl-2 border-l border-slate-800 space-y-2';
+
+          try {
+            const characteristics = await service.getCharacteristics();
+            
+            for (const char of characteristics) {
+              const props = [];
+              if (char.properties.read) props.push('READ');
+              if (char.properties.write) props.push('WRITE');
+              if (char.properties.writeWithoutResponse) props.push('WRITE_NO_RESP');
+              if (char.properties.notify) props.push('NOTIFY');
+              if (char.properties.indicate) props.push('INDICATE');
+
+              const charCard = document.createElement('div');
+              charCard.className = 'p-2 rounded bg-slate-900 border border-slate-800 text-[11px]';
+
+              const charUuidLine = document.createElement('div');
+              charUuidLine.className = 'font-mono text-slate-200 break-all';
+              charUuidLine.textContent = `Char: ${char.uuid}`;
+              charCard.appendChild(charUuidLine);
+
+              const propsLine = document.createElement('div');
+              propsLine.className = 'flex flex-wrap gap-1 mt-1';
+              props.forEach(p => {
+                const badge = document.createElement('span');
+                badge.className = 'px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-800 text-slate-300 border border-slate-700';
+                badge.textContent = p;
+                propsLine.appendChild(badge);
+              });
+              charCard.appendChild(propsLine);
+
+              // Action buttons row
+              const actionsRow = document.createElement('div');
+              actionsRow.className = 'flex items-center gap-2 mt-2';
+
+              // If readable
+              if (char.properties.read) {
+                const btnRead = document.createElement('button');
+                btnRead.className = 'px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-hud-cyan text-[10px]';
+                btnRead.textContent = 'Ler Valor';
+                btnRead.onclick = async () => {
+                  try {
+                    const value = await char.readValue();
+                    const hex = bufferToHex(value.buffer);
+                    appendLog(`READ:${char.uuid.slice(0, 8)}`, hex, 'rx');
+                  } catch (e) {
+                    appendLog('READ_ERR', e.message, 'err');
+                  }
+                };
+                actionsRow.appendChild(btnRead);
+              }
+
+              // If notifiable
+              if (char.properties.notify || char.properties.indicate) {
+                const btnNotify = document.createElement('button');
+                btnNotify.className = 'px-2 py-1 rounded bg-hud-green/10 text-hud-green border border-hud-green/30 hover:bg-hud-green hover:text-black text-[10px] transition-colors';
+                btnNotify.textContent = 'Assinar Notify';
+                btnNotify.onclick = async () => toggleNotification(char, btnNotify);
+                actionsRow.appendChild(btnNotify);
+              }
+
+              charCard.appendChild(actionsRow);
+              charListContainer.appendChild(charCard);
+
+              // Add to select if writable
+              if (char.properties.write || char.properties.writeWithoutResponse) {
+                state.writeCharacteristics.push(char);
+                const opt = document.createElement('option');
+                opt.value = char.uuid;
+                opt.textContent = `${char.uuid} (${props.join(', ')})`;
+                charSelect.appendChild(opt);
+              }
+            }
+          } catch (charErr) {
+            const errDiv = document.createElement('div');
+            errDiv.className = 'text-hud-amber text-[10px]';
+            errDiv.textContent = `Acesso restrito ou erro: ${charErr.message}`;
+            charListContainer.appendChild(errDiv);
+          }
+
+          serviceBlock.appendChild(charListContainer);
+          servicesTree.appendChild(serviceBlock);
+        }
+
+        if (state.writeCharacteristics.length > 0) {
+          appendLog('GATT', `${state.writeCharacteristics.length} característica(s) de escrita mapeada(s).`);
+        } else {
+          appendLog('GATT', 'Nenhuma característica padrão de escrita foi encontrada.', 'err');
+        }
+
+      } catch (err) {
+        appendLog('GATT_ERR', `Erro listando serviços: ${err.message}`, 'err');
+      }
+    }
+
+    async function toggleNotification(characteristic, buttonEl) {
+      try {
+        if (state.subscribedCharacteristics.has(characteristic.uuid)) {
+          // Unsubscribe
+          await characteristic.stopNotifications();
+          characteristic.removeEventListener('characteristicvaluechanged', onCharacteristicValueChanged);
+          state.subscribedCharacteristics.delete(characteristic.uuid);
+          buttonEl.textContent = 'Assinar Notify';
+          buttonEl.className = 'px-2 py-1 rounded bg-hud-green/10 text-hud-green border border-hud-green/30 hover:bg-hud-green hover:text-black text-[10px]';
+          appendLog('NOTIFY', `Notificações desativadas para ${characteristic.uuid}`);
+        } else {
+          // Subscribe
+          await characteristic.startNotifications();
+          characteristic.addEventListener('characteristicvaluechanged', onCharacteristicValueChanged);
+          state.subscribedCharacteristics.set(characteristic.uuid, characteristic);
+          buttonEl.textContent = 'Parar Notify';
+          buttonEl.className = 'px-2 py-1 rounded bg-hud-red/20 text-hud-red border border-hud-red hover:bg-hud-red hover:text-white text-[10px]';
+          appendLog('NOTIFY', `Notificações ATIVADAS para ${characteristic.uuid}`);
+        }
+      } catch (err) {
+        appendLog('NOTIFY_ERR', err.message, 'err');
+      }
+    }
+
+    function onCharacteristicValueChanged(event) {
+      const char = event.target;
+      const value = char.value;
+      const hex = bufferToHex(value.buffer);
+      state.rxCounter++;
+      dispRxCount.textContent = state.rxCounter;
+      appendLog(`RX:${char.uuid.slice(0, 6)}`, hex, 'rx');
+    }
+
+    async function sendHexPayload() {
+      const selectedUuid = charSelect.value;
+      if (!selectedUuid) {
+        appendLog('TX_ERR', 'Selecione uma característica com permissão de escrita antes.', 'err');
+        return;
+      }
+
+      const targetChar = state.writeCharacteristics.find(c => c.uuid === selectedUuid);
+      if (!targetChar) {
+        appendLog('TX_ERR', 'Característica selecionada não encontrada.', 'err');
+        return;
+      }
+
+      const rawInput = hexInput.value.trim();
+      if (!rawInput) {
+        appendLog('TX_ERR', 'Insira uma sequência de bytes hexadecimais.', 'err');
+        return;
+      }
+
+      try {
+        const dataBytes = hexStringToUint8Array(rawInput);
+        appendLog(`TX:${selectedUuid.slice(0, 6)}`, bufferToHex(dataBytes.buffer), 'tx');
+
+        if (targetChar.properties.write) {
+          await targetChar.writeValueWithResponse(dataBytes);
+        } else if (targetChar.properties.writeWithoutResponse) {
+          await targetChar.writeValueWithoutResponse(dataBytes);
+        } else {
+          await targetChar.writeValue(dataBytes);
+        }
+      } catch (err) {
+        appendLog('TX_ERR', err.message, 'err');
+      }
+    }
+
+    btnConnect.addEventListener('click', () => {
+      if (state.device && state.device.gatt.connected) {
+        disconnectBluetooth();
+      } else {
+        connectBluetooth();
+      }
+    });
+
+    btnSendHex.addEventListener('click', sendHexPayload);
+
+    hexInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        sendHexPayload();
+      }
+    });
+
+    btnClearLog.addEventListener('click', () => {
+      logViewport.innerHTML = '';
+      appendLog('SISTEMA', 'Terminal limpo.');
+    });
+
+    // Preset command buttons
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        hexInput.value = btn.getAttribute('data-hex');
+      });
+    });
+
+    // Initial check for navigator.bluetooth
+    window.addEventListener('DOMContentLoaded', () => {
+      runEnvironmentDiagnostics();
+    });
+  </script>
+</body>
+</html>
